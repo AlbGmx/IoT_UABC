@@ -17,8 +17,8 @@
 
 // Constants
 #define PORT 377
-#define SSID "IOT_NET"
-#define PASS "IOT_NET_PASS"
+#define SSID "ESP_NET"
+#define PASS "ESP_NET_IOT"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34 
 #define ADC1_CHANNEL ADC_CHANNEL_6

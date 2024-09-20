@@ -18,8 +18,8 @@
 #define LOG false
 
 // Constants
-#define SSID "IoT_AP"
-#define PASS "12345678"
+#define SSID "ESP_NET"
+#define PASS "ESP_NET_IOT"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
@@ -33,9 +33,8 @@
 #define LED_ELEMENT 'L'
 #define ADC_ELEMENT 'A'
 #define BUFFER_SIZE 128
-// #define PORT 65432
 #define PORT 8266
-// #define HOST_IP_ADDR "192.168.0.177"  // Local IP
+// #define HOST_IP_ADDR "192.168.1.69"  // Local IP
 #define HOST_IP_ADDR "82.180.173.228"  // IoT Server
 
 static const char *TAG = "Prototipo en Red Local";

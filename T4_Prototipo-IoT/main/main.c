@@ -1,4 +1,3 @@
-
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -14,12 +13,12 @@
 #include "lwip/sockets.h"
 #include "nvs_flash.h"
 
-//Logging variable
-#define LOG false
+// Logging variable
+#define LOG true
 
 // Constants
-#define SSID "IoT_AP"
-#define PASS "12345678"
+#define SSID "ESP_NET"
+#define PASS "ESP_NET_IOT"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
@@ -38,9 +37,20 @@
 // #define HOST_IP_ADDR "192.168.0.177"  // Local IP
 #define HOST_IP_ADDR "82.180.173.228"  // IoT Server
 
+typedef enum {
+   RECEIVED_INVALID = 0,
+   RECEIVED_NACK,
+   RECEIVED_ACK,
+   RECEIVED_DATA,
+   RECEIVE_IGNORE,
+} received_data_t;
+
 static const char *TAG = "Prototipo en Red Local";
+static const char *TAG2 = "Keep Alive";
+static const char *TAG3 = "TCP Client";
 static const char *log_in = "UABC:EGC:L:S:Log in";
 static const char *keep_alive = "UABC:EGC:K:S:Keep alive";
+TaskHandle_t keep_alive_task_handle = NULL;
 
 // Global variables
 bool wifi_connected = false;
@@ -179,13 +189,13 @@ void print_command_parsed(const char *prefix, char operation, char element, int 
                prefix, operation, element, comment, response);
    else
       ESP_LOGI(TAG,
-               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: \t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
+               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\t\tElement: \t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
                "\t\"%s\"\n\n\tResponse: \t\"%s\"",
                prefix, operation, element, value, comment, response);
 }
 
 void process_command(const char *command, char *response) {
-   const char *prefix = "UABC:";
+   const char *prefix = "UABC:EGC:";
    if (strncmp(command, prefix, strlen(prefix)) != 0) {
       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
       return;
@@ -216,9 +226,9 @@ void process_command(const char *command, char *response) {
 
    switch (operation) {
       case WRITE_INSTRUCTION:
-         if (element == LED_ELEMENT || value == '0' || value == '1') {
-            set_led((value == '1') ? 1 : 0);
-            snprintf(response, BUFFER_SIZE, ACK_RESPONSE);
+         if (element == LED_ELEMENT && (value == '0' || value == '1')) {
+            set_led(value - '0');
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d\n", read_led());
          } else {
             if (element == ADC_ELEMENT) ESP_LOGI(TAG, "ADC value is readonly");
             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
@@ -226,9 +236,9 @@ void process_command(const char *command, char *response) {
          break;
       case READ_INSTRUCTION:
          if (element == LED_ELEMENT) {
-            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_led());
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d\n", read_led());
          } else if (element == ADC_ELEMENT) {
-            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_adc_value());
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d\n", read_adc_value());
          } else {
             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
          }
@@ -238,18 +248,43 @@ void process_command(const char *command, char *response) {
       }
    }
 
-      print_command(prefix, operation, element, value, comment, response);
    if (LOG) {
-    print_command(prefix, operation, element, value, comment, response);
-    print_command_parsed(prefix, operation, element, value, comment, response);
-  }
+      print_command(prefix, operation, element, value, comment, response);
+      print_command_parsed(prefix, operation, element, value, comment, response);
+   }
 }
 
-void keep_alive_task(int *sock) {
+received_data_t receiveFromSockAndProcess(int sock, char *rx_buffer) {
+   int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+   if (len < 0) {
+      ESP_LOGE(TAG, "recv failed: errno %d", errno);
+      return RECEIVED_INVALID;
+   } else if (len == 0) {
+      ESP_LOGE(TAG, "error 0 data received????");
+      return RECEIVE_IGNORE;
+   }
+   rx_buffer[len] = 0;
+   ESP_LOGI(TAG, "Received %d bytes, \'%s\'\n", len, rx_buffer);
+   if (strstr(rx_buffer, ACK_RESPONSE) == rx_buffer) return RECEIVED_ACK;
+   if (strstr(rx_buffer, NACK_RESPONSE) == rx_buffer) return RECEIVED_NACK;
+   return RECEIVED_DATA;
+}
+
+void keep_alive_task(int sock) {
+   received_data_t received_data = RECEIVED_INVALID;
+   char temp_buffer[BUFFER_SIZE];
    while (true) {
       delaySeconds(15);
-      ESP_LOGI(TAG, "Sending keep alive message...");
-      send(*sock, keep_alive, strlen(keep_alive), 0);
+      ESP_LOGI(TAG2, "Sending keep alive message...");
+      send(sock, keep_alive, strlen(keep_alive), 0);
+      received_data = receiveFromSockAndProcess(sock, temp_buffer);
+      if (received_data == RECEIVED_ACK) {
+         ESP_LOGI(TAG2, "Keep alive successful");
+      } else {
+         logged_in = false;
+         vTaskSuspend(keep_alive_task_handle);
+         ESP_LOGE(TAG2, "Keep alive failed, logging out...");
+      }
    }
 }
 
@@ -269,59 +304,80 @@ void tcp_client_task() {
 
       int sock = socket(addr_family, SOCK_STREAM, ip_protocol);
       if (sock < 0) {
-         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+         ESP_LOGE(TAG3, "Unable to create socket: errno %d", errno);
          break;
       }
-      ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
+      ESP_LOGI(TAG3, "Socket created, connecting to %s:%d", host_ip, PORT);
 
       int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
       if (err != 0) {
-         ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
+         ESP_LOGE(TAG3, "Socket unable to connect: errno %d", errno);
          break;
       }
-      ESP_LOGI(TAG, "Successfully connected");
+      ESP_LOGI(TAG3, "Successfully connected");
 
-        while (1) {
-         int err = 0;
-            if(logged_in == false) {
-               err = send(sock, log_in, strlen(log_in), 0);
-            } 
+      while (true) {
+         err = 0;
+         received_data_t received_data = RECEIVED_INVALID;
+         if (logged_in == false) {
+            ESP_LOGI(TAG3, "Sending login message...");
+            err = send(sock, log_in, strlen(log_in), 0);
             if (err < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                break;
+               ESP_LOGE(TAG3, "Error occurred during sending: errno %d", errno);
+               break;
             }
+            received_data = receiveFromSockAndProcess(sock, rx_buffer);
+            if (received_data == RECEIVED_ACK) {
+               logged_in = true;
+               if (keep_alive_task_handle != NULL)
+                  vTaskResume(keep_alive_task_handle);
+               else
+                  xTaskCreate(keep_alive_task, "keep_alive", 4096, &sock, 5, &keep_alive_task_handle);
 
-         int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-         if (len < 0) {
-            ESP_LOGE(TAG, "recv failed: errno %d", errno);
-            break;
+               ESP_LOGI(TAG3, "Logged in successfully");
+            } else {
+               ESP_LOGE(TAG3, "Login failed, retrying...");
+               break;
+            }
+         } else {
+            ESP_LOGI(TAG3, "Logged in, waiting for commands...");
          }
 
-         else {
-            rx_buffer[len] = 0;
-            if (strstr(rx_buffer, NACK_RESPONSE) == rx_buffer ||
-                strstr(rx_buffer, ACK_RESPONSE) == rx_buffer) {
-               // TODO: Add logic for nack
-               ESP_LOGI(TAG, "RECEIVED FROM %s: \'%s\'\n", host_ip, rx_buffer);
+         received_data = receiveFromSockAndProcess(sock, rx_buffer);
+         if (received_data == RECEIVED_INVALID) {
+            ESP_LOGE(TAG3, "Error occurred during receiving: errno %d", errno);
+            break;
+         } else if (received_data == RECEIVED_NACK) {
+            ESP_LOGE(TAG3, "Received NACK, ignoring...");
+         } else if (received_data == RECEIVED_ACK) {
+            ESP_LOGE(TAG3, "Received ACK, ignoring...");
+         } else if (received_data == RECEIVED_DATA) {
+            if (strstr(rx_buffer, ACK_RESPONSE) == rx_buffer || strstr(rx_buffer, NACK_RESPONSE) == rx_buffer) {
+               ESP_LOGE(TAG3, "Received ack/nack, ignoring...");
             } else {
-               ESP_LOGI(TAG, "RECEIVED FROM %s:", host_ip);
-               ESP_LOGI(TAG, "\'%s\'\n", rx_buffer);
-
-               char answer[BUFFER_SIZE] = NACK_RESPONSE;  // Default response
-               process_command(rx_buffer, answer);
-               send(sock, answer, strlen(answer), 0);
-               ESP_LOGI(TAG, "SENT %s TO %s\n", answer, host_ip);
+               process_command(rx_buffer, rx_buffer);
+               ESP_LOGI(TAG3, "Received \'%s\'\n from %s:%d", rx_buffer, HOST_IP_ADDR, PORT);
+               err = send(sock, rx_buffer, strlen(rx_buffer), 0);
+               if (err < 0) {
+                  ESP_LOGE(TAG3, "Error occurred during sending: errno %d", errno);
+                  break;
+               }
             }
+         } else {
+            ESP_LOGI(TAG3, "Received invalid data");
          }
       }
 
       if (sock != -1) {
-         ESP_LOGE(TAG, "Shutting down socket and restarting...");
+         ESP_LOGE(TAG3, "Shutting down socket and restarting...");
+         vTaskSuspend(keep_alive_task_handle);
+         logged_in = false;
          shutdown(sock, 0);
          close(sock);
       } else if (sock == 0) {
-         ESP_LOGE(TAG, "Connection closed by server");
+         ESP_LOGE(TAG3, "Connection closed by server");
          vTaskSuspend(keep_alive_task_handle);
+         logged_in = false;
       }
    }
 }

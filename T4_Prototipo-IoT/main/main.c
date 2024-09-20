@@ -1,3 +1,6 @@
+
+#include <string.h>
+
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_event.h"
@@ -10,20 +13,19 @@
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "nvs_flash.h"
-#include <string.h>
 
-//Logging variable
+// Logging variable
 #define LOG false
 
 // Constants
-#define SSID "ESP_NET"
-#define PASS "ESP_NET_IOT"
+#define SSID "IoT_AP"
+#define PASS "12345678"
 #define LED GPIO_NUM_2
-#define ADC_SELECTED GPIO_NUM_34 
+#define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
 #define ADC_WIDTH ADC_BITWIDTH_12
 #define ADC_ATTEN ADC_ATTEN_DB_0
-#define WIFI_RETRY_MAX 5
+#define WIFI_RETRY_MAX 20
 #define NACK_RESPONSE "NACK"
 #define ACK_RESPONSE "ACK"
 #define WRITE_INSTRUCTION 'W'
@@ -31,12 +33,15 @@
 #define LED_ELEMENT 'L'
 #define ADC_ELEMENT 'A'
 #define BUFFER_SIZE 128
-#define HOST_IP_ADDR "192.168.1.69"
-#define PORT 377
+// #define PORT 65432
+#define PORT 8266
+// #define HOST_IP_ADDR "192.168.0.177"  // Local IP
+#define HOST_IP_ADDR "82.180.173.228"  // IoT Server
 
 static const char *TAG = "Prototipo en Red Local";
 static const char *log_in = "UABC:EGC:L:S:Log in";
 static const char *keep_alive = "UABC:EGC:K:S:Keep alive";
+TaskHandle_t keep_alive_task_handle = NULL;
 
 // Global variables
 bool wifi_connected = false;
@@ -45,11 +50,20 @@ int retry_num = 0;
 static adc_oneshot_unit_handle_t adc1_handle;
 
 void gpio_init() {
-   esp_rom_gpio_pad_select_gpio(LED);
-   gpio_set_direction(LED, GPIO_MODE_OUTPUT);
+   gpio_config_t io_conf;
+   io_conf.intr_type = GPIO_INTR_DISABLE;
+   io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
+   io_conf.pin_bit_mask = (1ULL << LED);
+   io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+   io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+   gpio_config(&io_conf);
 
-   esp_rom_gpio_pad_select_gpio(ADC_SELECTED);
-   gpio_set_direction(ADC_SELECTED, GPIO_MODE_INPUT);
+   io_conf.intr_type = GPIO_INTR_DISABLE;
+   io_conf.mode = GPIO_MODE_INPUT;
+   io_conf.pin_bit_mask = (1ULL << ADC_SELECTED);
+   io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+   io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+   gpio_config(&io_conf);
 }
 
 void adc_init() {
@@ -95,6 +109,8 @@ int read_adc_value() {
    ESP_LOGE(TAG, "Failed to read ADC value");
    return ESP_FAIL;
 }
+
+void delaySeconds(uint8_t seconds) { vTaskDelay(seconds * 1000 / portTICK_PERIOD_MS); }
 
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,
                                void *event_data) {
@@ -159,17 +175,18 @@ void print_command_parsed(const char *prefix, char operation, char element, int 
                           char *response) {
    if (operation == 'R')
       ESP_LOGI(TAG,
-               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: \t\"%c\"\n\tComment: \t\"%s\"\n\n\tResponse: \t\"%s\"",
+               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: \t\"%c\"\n\tComment: \t\"%s\"\n\n\tResponse: "
+               "\t\"%s\"",
                prefix, operation, element, comment, response);
    else
       ESP_LOGI(TAG,
-               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: \t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
+               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\t\tElement: \t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
                "\t\"%s\"\n\n\tResponse: \t\"%s\"",
                prefix, operation, element, value, comment, response);
 }
 
 void process_command(const char *command, char *response) {
-   const char *prefix = "UABC:";
+   const char *prefix = "UABC:EGC:";
    if (strncmp(command, prefix, strlen(prefix)) != 0) {
       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
       return;
@@ -200,9 +217,9 @@ void process_command(const char *command, char *response) {
 
    switch (operation) {
       case WRITE_INSTRUCTION:
-         if (element == LED_ELEMENT || value == '0' || value == '1') {
-            set_led((value == '1') ? 1 : 0);
-            snprintf(response, BUFFER_SIZE, ACK_RESPONSE);
+         if (element == LED_ELEMENT && (value == '0' || value == '1')) {
+            set_led(value - '0');
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_led());
          } else {
             if (element == ADC_ELEMENT) ESP_LOGI(TAG, "ADC value is readonly");
             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
@@ -221,164 +238,99 @@ void process_command(const char *command, char *response) {
          snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
       }
    }
+
+      print_command(prefix, operation, element, value, comment, response);
    if (LOG) {
-    print_command(prefix, operation, element, value, comment, response);
-    print_command_parsed(prefix, operation, element, value, comment, response);
-  }
+      print_command_parsed(prefix, operation, element, value, comment, response);
+   }
 }
 
-void tcp_client_task(void)
-{
-    char rx_buffer[128];
-    char host_ip[] = HOST_IP_ADDR;
-    int addr_family = 0;
-    int ip_protocol = 0;
-
-    while (1) {
-        struct sockaddr_in dest_addr;
-        inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(PORT);
-        addr_family = AF_INET;
-        ip_protocol = IPPROTO_IP;
-
-
-        int sock =  socket(addr_family, SOCK_STREAM, ip_protocol);
-        if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-            break;
-        }
-        ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
-
-        int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        if (err != 0) {
-            ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
-            break;
-        }
-        ESP_LOGI(TAG, "Successfully connected");
-
-        while (1) {
-         int err = 0;
-            if(logged_in == false) {
-               err = send(sock, log_in, strlen(log_in), 0);
-            } 
-            if (err < 0) {
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                break;
-            }
-
-            int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-            // Error occurred during receiving
-            if (len < 0) {
-                ESP_LOGE(TAG, "recv failed: errno %d", errno);
-                break;
-            }
-            
-            // Data received
-            else { 
-               char answer[BUFFER_SIZE] = NACK_RESPONSE;  // Default response
-                process_command(rx_buffer, answer);
-                recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-            }
-        }
-
-        if (sock != -1) {
-            ESP_LOGE(TAG, "Shutting down socket and restarting...");
-            shutdown(sock, 0);
-            close(sock);
-        }
-    }
+void keep_alive_task(int *sock) {
+   while (true) {
+      delaySeconds(15);
+      ESP_LOGI(TAG, "Sending keep alive message...");
+      send(*sock, keep_alive, strlen(keep_alive), 0);
+   }
 }
 
-/*
-static void udp_server_task(void *pvParameters) {
-   char rx_buffer[BUFFER_SIZE];
-   char addr_str[BUFFER_SIZE];
-   int addr_family = (int)pvParameters;
-   int ip_protocol;
-   struct sockaddr_in6 dest_addr;
-   struct sockaddr_storage source_addr;
-   socklen_t socklen = sizeof(source_addr);
-   memset(&dest_addr, 0, sizeof(dest_addr));
+void tcp_client_task() {
+   char rx_buffer[128];
+   char host_ip[] = HOST_IP_ADDR;
+   int addr_family = 0;
+   int ip_protocol = 0;
 
-   switch (addr_family) {
-      case AF_INET:  // IPv4
-         struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
-         dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
-         dest_addr_ip4->sin_family = AF_INET;
-         dest_addr_ip4->sin_port = htons(PORT);
-         ip_protocol = IPPROTO_IP;
+   while (true) {
+      struct sockaddr_in dest_addr;
+      inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
+      dest_addr.sin_family = AF_INET;
+      dest_addr.sin_port = htons(PORT);
+      addr_family = AF_INET;
+      ip_protocol = IPPROTO_IP;
+
+      int sock = socket(addr_family, SOCK_STREAM, ip_protocol);
+      if (sock < 0) {
+         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
          break;
-      case AF_INET6:  // IPv6
-         dest_addr.sin6_family = AF_INET6;
-         dest_addr.sin6_port = htons(PORT);
-         ip_protocol = IPPROTO_IPV6;
+      }
+      ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
+
+      int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+      if (err != 0) {
+         ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
          break;
-      default:
-         ESP_LOGE(TAG, "Unsupported address family: %d", addr_family);
-         vTaskDelete(NULL);
-         return;
-   }
+      }
+      ESP_LOGI(TAG, "Successfully connected");
 
-   // Creating UDP socket
-   int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
-   if (sock < 0) {
-      ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-      vTaskDelete(NULL);
-      return;
-   }
-   ESP_LOGI(TAG, "Socket created");
-
-   // Binding the socket to the address
-   if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
-      ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
-      close(sock);
-      vTaskDelete(NULL);
-      return;
-   }
-   ESP_LOGI(TAG, "Socket bound, port %d", PORT);
-
-   while (1) {
-      ESP_LOGI(TAG, "Waiting for data...");
-
-      int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
-
-      if (len < 0) {
-         if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
-            break;
+      while (true) {
+         err = 0;
+         if (logged_in == false) {
+            ESP_LOGI(TAG, "Sending login message...");
+            err = send(sock, log_in, strlen(log_in), 0);
+            if (keep_alive_task_handle != NULL)
+               vTaskResume(keep_alive_task_handle);
+            else
+               xTaskCreate(keep_alive_task, "keep_alive", 4096, &sock, 5, &keep_alive_task_handle);
+            logged_in = true;
          }
-      } else if (len > 0) {
-         rx_buffer[len] = 0;
-
-         if (source_addr.ss_family == AF_INET) {
-            inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-         } else if (source_addr.ss_family == AF_INET6) {
-            inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
-         }
-
-         ESP_LOGW(TAG, "Received %d bytes from %s:", len, addr_str);
-         ESP_LOGW(TAG, "%s", rx_buffer);
-
-         char answer[BUFFER_SIZE] = NACK_RESPONSE;  // Default response
-         process_command(rx_buffer, answer);
-
-         int err = sendto(sock, answer, strlen(answer), 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
          if (err < 0) {
             ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
             break;
          }
+
+         int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+         if (len < 0) {
+            ESP_LOGE(TAG, "recv failed: errno %d", errno);
+            break;
+         }
+
+         else {
+            rx_buffer[len] = 0;
+            if (strstr(rx_buffer, NACK_RESPONSE) == rx_buffer ||
+                strstr(rx_buffer, ACK_RESPONSE) == rx_buffer) {
+               // TODO: Add logic for nack
+               ESP_LOGI(TAG, "RECEIVED FROM %s: \'%s\'\n", host_ip, rx_buffer);
+            } else {
+               ESP_LOGI(TAG, "RECEIVED FROM %s:", host_ip);
+               ESP_LOGI(TAG, "\'%s\'\n", rx_buffer);
+
+               char answer[BUFFER_SIZE] = NACK_RESPONSE;  // Default response
+               process_command(rx_buffer, answer);
+               send(sock, answer, strlen(answer), 0);
+               ESP_LOGI(TAG, "SENT %s TO %s\n", answer, host_ip);
+            }
+         }
+      }
+
+      if (sock != -1) {
+         ESP_LOGE(TAG, "Shutting down socket and restarting...");
+         shutdown(sock, 0);
+         close(sock);
+      } else if (sock == 0) {
+         ESP_LOGE(TAG, "Connection closed by server");
+         vTaskSuspend(keep_alive_task_handle);
       }
    }
-
-   if (sock != -1) {
-      ESP_LOGE(TAG, "Shutting down socket and restarting...");
-      shutdown(sock, 0);
-      close(sock);
-   }
-   vTaskDelete(NULL);
 }
-*/
 
 void app_main(void) {
    ESP_ERROR_CHECK(nvs_flash_init());
@@ -390,10 +342,11 @@ void app_main(void) {
          ESP_LOGE(TAG, "Connection failed. Maximum retries reached, it is likely that the SSID cannot be found.");
          return;
       }
-      ESP_LOGI(TAG, "Waiting for WIFI connection before starting UDP server...\n");
+      ESP_LOGI(TAG, "Waiting for WIFI before starting TCP server connection...\n");
       fflush(stdout);
       vTaskDelay(1000 / portTICK_PERIOD_MS);
    }
    // xTaskCreate(udp_server_task, "udp_server", 4096, (void *)AF_INET, 5, NULL);
+   // xEventGroupSync
    xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
 }

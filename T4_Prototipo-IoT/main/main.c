@@ -14,12 +14,12 @@
 #include "lwip/sockets.h"
 #include "nvs_flash.h"
 
-// Logging variable
-#define LOG true
+//Logging variable
+#define LOG false
 
 // Constants
-#define SSID "ESP_NET"
-#define PASS "ESP_NET_IOT"
+#define SSID "IoT_AP"
+#define PASS "12345678"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
@@ -35,13 +35,12 @@
 #define BUFFER_SIZE 128
 // #define PORT 65432
 #define PORT 8266
-// #define HOST_IP_ADDR "201.142.138.246"  // Local IP
+// #define HOST_IP_ADDR "192.168.0.177"  // Local IP
 #define HOST_IP_ADDR "82.180.173.228"  // IoT Server
 
 static const char *TAG = "Prototipo en Red Local";
-static const char *log_in = "UABC:RRC:L:S:Log in";
-static const char *keep_alive = "UABC:RRC:K:S:Keep alive";
-TaskHandle_t keep_alive_task_handle = NULL;
+static const char *log_in = "UABC:EGC:L:S:Log in";
+static const char *keep_alive = "UABC:EGC:K:S:Keep alive";
 
 // Global variables
 bool wifi_connected = false;
@@ -180,13 +179,13 @@ void print_command_parsed(const char *prefix, char operation, char element, int 
                prefix, operation, element, comment, response);
    else
       ESP_LOGI(TAG,
-               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: \t\t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
+               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: \t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
                "\t\"%s\"\n\n\tResponse: \t\"%s\"",
                prefix, operation, element, value, comment, response);
 }
 
 void process_command(const char *command, char *response) {
-   const char *prefix = "UABC:RRC:";
+   const char *prefix = "UABC:";
    if (strncmp(command, prefix, strlen(prefix)) != 0) {
       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
       return;
@@ -217,8 +216,8 @@ void process_command(const char *command, char *response) {
 
    switch (operation) {
       case WRITE_INSTRUCTION:
-         if (element == LED_ELEMENT && (value == '0' || value == '1')) {
-            set_led(value - '0');
+         if (element == LED_ELEMENT || value == '0' || value == '1') {
+            set_led((value == '1') ? 1 : 0);
             snprintf(response, BUFFER_SIZE, ACK_RESPONSE);
          } else {
             if (element == ADC_ELEMENT) ESP_LOGI(TAG, "ADC value is readonly");
@@ -238,10 +237,12 @@ void process_command(const char *command, char *response) {
          snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
       }
    }
-   if (LOG) {
+
       print_command(prefix, operation, element, value, comment, response);
-      print_command_parsed(prefix, operation, element, value, comment, response);
-   }
+   if (LOG) {
+    print_command(prefix, operation, element, value, comment, response);
+    print_command_parsed(prefix, operation, element, value, comment, response);
+  }
 }
 
 void keep_alive_task(int *sock) {
@@ -280,21 +281,15 @@ void tcp_client_task() {
       }
       ESP_LOGI(TAG, "Successfully connected");
 
-      while (true) {
-         err = 0;
-         if (logged_in == false) {
-            ESP_LOGI(TAG, "Sending  alive message...");
-            err = send(sock, log_in, strlen(log_in), 0);
-            if (keep_alive_task_handle != NULL)
-               vTaskResume(keep_alive_task_handle);
-            else
-               xTaskCreate(keep_alive_task, "keep_alive", 4096, &sock, 5, &keep_alive_task_handle);
-            logged_in = true;
-         }
-         if (err < 0) {
-            ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-            break;
-         }
+        while (1) {
+         int err = 0;
+            if(logged_in == false) {
+               err = send(sock, log_in, strlen(log_in), 0);
+            } 
+            if (err < 0) {
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                break;
+            }
 
          int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
          if (len < 0) {

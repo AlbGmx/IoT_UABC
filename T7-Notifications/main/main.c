@@ -5,6 +5,7 @@
 #include <sys/param.h>
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -17,16 +18,9 @@
 #include "lwip/sockets.h"
 #include "nvs_flash.h"
 
-
-#define TASK_STACK_SIZE (8 * 1024)
-#define BUF_SIZE 512
-
-// Logging variable
-#define LOG false
-
 // Constants
-#define SSID "prueba"
-#define PASS "iotprueba"
+#define SSID "ESP_NET"
+#define PASS "ESP_NET_IOT"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
@@ -39,14 +33,24 @@
 #define READ_INSTRUCTION 'R'
 #define LED_ELEMENT 'L'
 #define ADC_ELEMENT 'A'
+#define PWM_ELEMENT 'P'
 #define BUFFER_SIZE 128
 #define PORT 8266
 // #define HOST_IP_ADDR "192.168.1.69"  // Local IP
 #define HOST_IP_ADDR "82.180.173.228"  // IoT Server
 #define LED_PWM GPIO_NUM_21
+#define LEDC_TIMER LEDC_TIMER_0
+#define LEDC_CHANNEL 0
+#define LEDC_MODE 0
+#define LEDC_OUTPUT_IO GPIO_NUM_15
+#define LEDC_DUTY_RESOLUTION LEDC_TIMER_10_BIT
+#define TWO_TO_THE_POWER_OF_10 1024  // Manually calculated to avoid math.h
+#define LEDC_FREQUENCY 400
 
-#define BUTTON_SEND_MESSAGE GPIO_NUM_18
+#define BUTTON_SEND_MESSAGE GPIO_NUM_23
 #define BUTTON_BOUNCE_TIME 150
+#define SECOND_IN_MILLIS 1000
+#define SEND_MESSAGE_DELAY_TIME 10 * SECOND_IN_MILLIS
 #define RELEASED 0
 #define PRESSED 1
 #define MINIMUM_DELAY_MS 10
@@ -54,11 +58,10 @@
 static const char *TAG = "Prototipo en Red Local";
 static const char *log_in = "UABC:EGC:L:S:Log in";
 static const char *keep_alive = "UABC:EGC:K:S:Keep alive";
-static const char *message = "UABC:EGC:W:SMS:6656560351:Hola Mundo";
+static const char *message = "UABC:EGC:M:S:6656560351:Hola Mundo";
 TaskHandle_t keep_alive_task_handle = NULL;
 QueueHandle_t buttonQueueHandler;
 int32_t lastStateChange = 0;
-uint32_t currentTime = 0;
 
 // Global variables
 bool wifi_connected = false;
@@ -83,11 +86,11 @@ void gpio_init() {
    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
    gpio_config(&io_conf);
 
-   io_conf.intr_type = GPIO_INTR_NEGEDGE;
+   io_conf.intr_type = GPIO_INTR_POSEDGE;
    io_conf.mode = GPIO_MODE_INPUT;
    io_conf.pin_bit_mask = (1 << BUTTON_SEND_MESSAGE);
-   io_conf.pull_down_en = 1;
-   io_conf.pull_up_en = 0;
+   io_conf.pull_down_en = 0;
+   io_conf.pull_up_en = 1;
    gpio_config(&io_conf);
 }
 
@@ -114,6 +117,28 @@ void adc_init() {
    ESP_LOGI(TAG, "ADC initialized");
 }
 
+void ledc_init() {
+   ledc_timer_config_t ledc_timer = {
+       .duty_resolution = LEDC_TIMER_10_BIT,  // resolution of PWM duty
+       .freq_hz = LEDC_FREQUENCY,             // frequency of PWM signal
+       .speed_mode = LEDC_HIGH_SPEED_MODE,    // timer mode
+       .timer_num = LEDC_TIMER_0,             // timer index
+       .clk_cfg = LEDC_AUTO_CLK,              // Auto select the source clock
+   };
+   ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+   ledc_channel_config_t ledc_channel = {
+       .speed_mode = LEDC_MODE,
+       .channel = LEDC_CHANNEL,
+       .timer_sel = LEDC_TIMER,
+       .intr_type = LEDC_INTR_DISABLE,
+       .gpio_num = LEDC_OUTPUT_IO,
+       .duty = 0,  // Set duty to 0%
+       .hpoint = 0,
+   };
+   ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+}
+
 void set_led(int value) {
    gpio_set_level(LED, value);
    ESP_LOGI(TAG, "LED set to: %d", value);
@@ -123,6 +148,21 @@ int read_led() {
    int led_state = gpio_get_level(LED);
    ESP_LOGI(TAG, "LED state is: %d", led_state);
    return led_state;
+}
+
+void set_pwm(uint16_t percentage) {
+   // Formula for value = (2 ^ LEDC_DUTY_RESOLUTION) * percentage / 100
+   int32_t value = (TWO_TO_THE_POWER_OF_10 * percentage) / 100;
+   ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, value);
+   ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
+   ESP_LOGI(TAG, "PWM LED set to: %%%d, %ld", percentage, value);
+}
+
+uint16_t read_pwm() {
+   uint16_t pwm_value = ledc_get_duty(LEDC_MODE, LEDC_CHANNEL);
+   pwm_value = (pwm_value * 100) / TWO_TO_THE_POWER_OF_10;
+   ESP_LOGI(TAG, "PWM LED is: %d", pwm_value);
+   return pwm_value;
 }
 
 int read_adc_value() {
@@ -135,7 +175,7 @@ int read_adc_value() {
    return ESP_FAIL;
 }
 
-void delaySeconds(uint8_t seconds) { vTaskDelay(seconds * 1000 / portTICK_PERIOD_MS); }
+void delaySeconds(uint8_t seconds) { vTaskDelay(seconds * SECOND_IN_MILLIS / portTICK_PERIOD_MS); }
 
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,
                                void *event_data) {
@@ -156,7 +196,6 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
          }
          break;
       case IP_EVENT_STA_GOT_IP:
-         // ESP_LOGI(TAG, "Connected with IP %s", ip4addr_ntoa(&((ip_event_got_ip_t *)event_data)->ip_info.ip));
          wifi_connected = true;
          break;
       default:
@@ -176,40 +215,51 @@ void wifi_init() {
    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
 
-   wifi_config_t wifi_configuration = {.sta = {
-                                           .ssid = SSID,
-                                           .password = PASS,
-                                       }};
+   wifi_config_t wifi_configuration = {.sta = {.ssid = SSID, .password = PASS}};
 
    esp_wifi_set_mode(WIFI_MODE_STA);
    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);
    esp_wifi_start();
-   esp_wifi_connect();
 
    ESP_LOGI(TAG, "Wi-Fi initialization complete. Attempting to connect to SSID: %s", SSID);
+   esp_wifi_connect();
 }
 
-void print_command(const char *prefix, char operation, char element, int value, const char *comment, char *response) {
-   if (operation == 'R')
-      ESP_LOGI(TAG, "%s%c:%c:%s -> %s", prefix, operation, element, comment, response);
-   else
-      ESP_LOGI(TAG, "%s%c:%c:%c:%s -> %s", prefix, operation, element, value, comment, response);
-}
+// void print_command(const char *prefix, char operation, char element, int value, const char *comment, char *response)
+// {
+//    if (operation == 'R')
+//       ESP_LOGI(TAG, "%s%c:%c:%s -> %s", prefix, operation, element, comment, response);
+//    else
+//       ESP_LOGI(TAG, "%s%c:%c:%c:%s -> %s", prefix, operation, element, value, comment, response);
+// }
 
-void print_command_parsed(const char *prefix, char operation, char element, int value, const char *comment,
-                          char *response) {
-   if (operation == 'R')
-      ESP_LOGI(TAG,
-               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: "
-               "\t\"%c\"\n\tComment: \t\"%s\"\n\n\tResponse: "
-               "\t\"%s\"",
-               prefix, operation, element, comment, response);
-   else
-      ESP_LOGI(TAG,
-               "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\t\tElement: "
-               "\t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
-               "\t\"%s\"\n\n\tResponse: \t\"%s\"",
-               prefix, operation, element, value, comment, response);
+// void print_command_parsed(const char *prefix, char operation, char element, int value, const char *comment,
+//                           char *response) {
+//    if (operation == 'R')
+//       ESP_LOGI(TAG,
+//                "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\tElement: "
+//                "\t\"%c\"\n\tComment: \t\"%s\"\n\n\tResponse: "
+//                "\t\"%s\"",
+//                prefix, operation, element, comment, response);
+//    else
+//       ESP_LOGI(TAG,
+//                "\n\tPrefix: \t\"%s\"\n\tOperation: \t\"%c\"\n\t\tElement: "
+//                "\t\"%c\"\n\tValue: \t\"%c\"\n\tComment: "
+//                "\t\"%s\"\n\n\tResponse: \t\"%s\"",
+//                prefix, operation, element, value, comment, response);
+// }
+
+int read_element(int element) {
+   switch (element) {
+      case LED_ELEMENT:
+         return read_led();
+      case ADC_ELEMENT:
+         return read_adc_value();
+      case PWM_ELEMENT:
+         return read_pwm();
+      default:
+         return ESP_FAIL;
+   }
 }
 
 void process_command(const char *command, char *response) {
@@ -222,10 +272,10 @@ void process_command(const char *command, char *response) {
    const char *cmd = command + strlen(prefix);
    char operation;
    char element;
-   char value;
+   char value[3] = {0};
    char comment[BUFFER_SIZE] = {0};
 
-   int parsed = sscanf(cmd, "%c:%c:%c:%127[^:]s", &operation, &element, &value, comment);
+   int parsed = sscanf(cmd, "%c:%c:%3[^:]s:%127[^:]s", &operation, &element, value, comment);
    if (parsed <= 2 || parsed > 4) {
       ESP_LOGE(TAG, "Parsed: %d", parsed);
       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
@@ -237,38 +287,35 @@ void process_command(const char *command, char *response) {
       } else {
          char temp[BUFFER_SIZE - sizeof(value)] = {0};
          strcpy(temp, comment);
-         snprintf(comment, BUFFER_SIZE, "%c%s", value, temp);
+         snprintf(comment, BUFFER_SIZE, "%s%s", value, temp);
       }
-      value = -1;
+      value[0] = 0;
    }
 
    switch (operation) {
       case WRITE_INSTRUCTION:
-         if (element == LED_ELEMENT && (value == '0' || value == '1')) {
-            set_led(value - '0');
+         if (element == LED_ELEMENT && (value[0] == '0' || value[0] == '1')) {
+            set_led(value[0] - '0');
             snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_led());
+         } else if (element == PWM_ELEMENT) {
+            set_pwm(atoi(value));
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_pwm());
          } else {
             if (element == ADC_ELEMENT) ESP_LOGI(TAG, "ADC value is readonly");
             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
          }
          break;
       case READ_INSTRUCTION:
-         if (element == LED_ELEMENT) {
-            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_led());
-         } else if (element == ADC_ELEMENT) {
-            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_adc_value());
+         int readed_value = read_element(element);
+         if (readed_value != ESP_FAIL) {
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", readed_value);
          } else {
             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
          }
          break;
-      default: {
-         snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
-      }
-   }
 
-   print_command(prefix, operation, element, value, comment, response);
-   if (LOG) {
-      print_command_parsed(prefix, operation, element, value, comment, response);
+      default:
+         snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
    }
 }
 
@@ -276,7 +323,7 @@ void keep_alive_task() {
    while (true) {
       delaySeconds(15);
       ESP_LOGI(TAG, "Sending keep alive message...");
-      send( sock, keep_alive, strlen(keep_alive), 0);
+      send(sock, keep_alive, strlen(keep_alive), 0);
    }
 }
 
@@ -359,29 +406,25 @@ void tcp_client_task() {
    }
 }
 
-void send_email() {
-   int pinNumber;
-   while (true) {
-      if (xQueueReceive(buttonQueueHandler, &pinNumber, portMAX_DELAY)) {
-         if (logged_in) {
-            ESP_LOGI(TAG, "Sending message...");
-            send(sock, message, strlen(message), 0);
-
-         }
-      }
+static void IRAM_ATTR buttonInterruptHandler(void *args) {
+   uint32_t button = (uint32_t)args;
+   int64_t currentTime = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
+   if (currentTime - lastStateChange >= SEND_MESSAGE_DELAY_TIME) {
+      lastStateChange = currentTime;
+      xQueueSendFromISR(buttonQueueHandler, &button, NULL);
    }
 }
 
-static void IRAM_ATTR buttonInterruptHandler(void *args) {
-   uint32_t buttonActioned = (uint32_t)args;
-
-   currentTime = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
-   if (currentTime - lastStateChange < BUTTON_BOUNCE_TIME) {
-      return;
+void send_email() {
+   uint32_t pinNumber;
+   while (true) {
+      if (xQueueReceive(buttonQueueHandler, &pinNumber, portMAX_DELAY)) {
+         if (logged_in) {
+            ESP_LOGI(TAG, "Sending phone message");
+            send(sock, message, strlen(message), 0);
+         }
+      }
    }
-   lastStateChange = currentTime;
-   xQueueSendFromISR(buttonQueueHandler, &buttonActioned, NULL);
 }
 
 void configInterruptions() {
@@ -397,7 +440,7 @@ void app_main(void) {
    wifi_init();
    gpio_init();
    adc_init();
-   configInterruptions();
+   ledc_init();
    while (!wifi_connected) {
       if (retry_num == WIFI_RETRY_MAX) {
          ESP_LOGE(TAG,
@@ -409,6 +452,6 @@ void app_main(void) {
       fflush(stdout);
       vTaskDelay(1000 / portTICK_PERIOD_MS);
    }
-
    xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
+   configInterruptions();
 }

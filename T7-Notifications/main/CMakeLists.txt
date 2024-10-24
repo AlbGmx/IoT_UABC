@@ -1,2 +1,2 @@
-idf_component_register(SRCS "smtp_client_example_main.c"
-                       EMBED_TXTFILES server_root_cert.pem esp_logo.png)
+idf_component_register(SRCS "main.c"
+                    INCLUDE_DIRS ".")

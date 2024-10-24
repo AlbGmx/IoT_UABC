@@ -1,8 +1,4 @@
-
-#include <mbedtls/base64.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/param.h>
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -58,7 +54,7 @@
 static const char *TAG = "Prototipo en Red Local";
 static const char *log_in = "UABC:EGC:L:S:Log in";
 static const char *keep_alive = "UABC:EGC:K:S:Keep alive";
-static const char *message = "UABC:EGC:M:S:6656560351:Hola Mundo";
+static const char *message = "UABC:EGC:M:S:AGREGAR_NUMERO:Mensaje enviado desde ESP32";
 TaskHandle_t keep_alive_task_handle = NULL;
 QueueHandle_t buttonQueueHandler;
 int32_t lastStateChange = 0;
@@ -86,7 +82,7 @@ void gpio_init() {
    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
    gpio_config(&io_conf);
 
-   io_conf.intr_type = GPIO_INTR_POSEDGE;
+   io_conf.intr_type = GPIO_INTR_NEGEDGE;
    io_conf.mode = GPIO_MODE_INPUT;
    io_conf.pin_bit_mask = (1 << BUTTON_SEND_MESSAGE);
    io_conf.pull_down_en = 0;

@@ -15,8 +15,8 @@
 #include "nvs_flash.h"
 
 // Constants
-#define SSID "ESP_NET"
-#define PASS "ESP_NET_IOT"
+#define SSID "IoT_AP"
+#define PASS "12345678"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
@@ -46,24 +46,26 @@
 #define BUTTON_SEND_MESSAGE GPIO_NUM_23
 #define BUTTON_BOUNCE_TIME 150
 #define SECOND_IN_MILLIS 1000
-#define SEND_MESSAGE_DELAY_TIME 10 * SECOND_IN_MILLIS
+#define SEND_MESSAGE_DELAY_TIME 60 * SECOND_IN_MILLIS
 #define RELEASED 0
 #define PRESSED 1
 #define MINIMUM_DELAY_MS 10
+#define FREED 1
+#define PUSHED 0
 
 static const char *TAG = "Prototipo en Red Local";
 static const char *log_in = "UABC:EGC:L:S:Log in";
 static const char *keep_alive = "UABC:EGC:K:S:Keep alive";
-static const char *message = "UABC:EGC:M:S:AGREGAR_NUMERO:Mensaje enviado desde ESP32";
-TaskHandle_t keep_alive_task_handle = NULL;
-QueueHandle_t buttonQueueHandler;
+static const char *message = "UABC:EGC:M:S:6656560351:Mensaje enviado desde ESP32";
 int32_t lastStateChange = 0;
+TaskHandle_t keep_alive_task_handle = NULL;
 
 // Global variables
 bool wifi_connected = false;
 bool logged_in = false;
 int retry_num = 0;
 int sock = 0;
+bool messageSent = 0;
 static adc_oneshot_unit_handle_t adc1_handle;
 
 void gpio_init() {
@@ -402,33 +404,34 @@ void tcp_client_task() {
    }
 }
 
-static void IRAM_ATTR buttonInterruptHandler(void *args) {
-   uint32_t button = (uint32_t)args;
-   int64_t currentTime = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
-   if (currentTime - lastStateChange >= SEND_MESSAGE_DELAY_TIME) {
-      lastStateChange = currentTime;
-      xQueueSendFromISR(buttonQueueHandler, &button, NULL);
-   }
-}
+void send_email_task() {
+   bool buttonState = 0;
+   lastStateChange = -SEND_MESSAGE_DELAY_TIME;
 
-void send_email() {
-   uint32_t pinNumber;
    while (true) {
-      if (xQueueReceive(buttonQueueHandler, &pinNumber, portMAX_DELAY)) {
-         if (logged_in) {
-            ESP_LOGI(TAG, "Sending phone message");
-            send(sock, message, strlen(message), 0);
+      buttonState = gpio_get_level(BUTTON_SEND_MESSAGE);
+      int64_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+      // ESP_LOGI(TAG, "buttonState %s, now %lld", buttonState == FREED ? "Liberado" : "P", now);
+
+      // ESP_LOGI(TAG, "buttonState %d, now %lld", buttonState, now);
+      if (buttonState == FREED) {
+         while (gpio_get_level(BUTTON_SEND_MESSAGE) == FREED) {
+            // ESP_LOGI(TAG, "Esperando a que el boton sea presionado");
+            vTaskDelay(10 / portTICK_PERIOD_MS);
          }
+         if (now - lastStateChange > SEND_MESSAGE_DELAY_TIME) {
+            ESP_LOGI(TAG, "Boton presionado, enviando mensaje\n");
+            send(sock, message, strlen(message), 0);
+            lastStateChange = xTaskGetTickCount() * portTICK_PERIOD_MS;
+         }
+         while (gpio_get_level(BUTTON_SEND_MESSAGE) == PUSHED) {
+            // ESP_LOGI(TAG, "Esperando a que el boton sea liberado");
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+         }
+         // ESP_LOGI(TAG, "Se ha soltado el button\n");
       }
+      vTaskDelay(10 / portTICK_PERIOD_MS);
    }
-}
-
-void configInterruptions() {
-   buttonQueueHandler = xQueueCreate(10, sizeof(uint32_t));
-   xTaskCreate(send_email, "sendEmail", 2048, NULL, 1, NULL);
-
-   gpio_install_isr_service(0);
-   gpio_isr_handler_add(BUTTON_SEND_MESSAGE, buttonInterruptHandler, (void *)BUTTON_SEND_MESSAGE);
 }
 
 void app_main(void) {
@@ -449,5 +452,5 @@ void app_main(void) {
       vTaskDelay(1000 / portTICK_PERIOD_MS);
    }
    xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
-   configInterruptions();
+   xTaskCreate(send_email_task, "sendEmail", 2048, NULL, 1, NULL);
 }

@@ -2,3 +2,7 @@ build/
 .vscode/
 *.DS_Store
 .devcontainer/
+sdkconfig
+sdkconfig.old
+dependencies
+dependencies.lock

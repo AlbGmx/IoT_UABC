@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Configure the wifi</h2>
+<div id="container" class="container">
+<form action="/config">
+  <label for="query_name">Nombre del ESP32</label><br>
+  <input type="text" id="query_name" name="query_name" placeholder="0 or 1"><br><br>
+  <label for="query_ssid">Nombre del WiFi</label><br>
+  <input type="text" id="query_ssid" name="query_ssid" placeholder="SSID"><br><br>
+  <label for="query_pass">Contraseña</label><br>
+  <input type="password" id="query_pass" name="query_pass" placeholder="Password"><br><br><br>
+  <input type="submit" value="Enviar">
+</form> 
+
+<p></p>
+</div>
+</body>
+<style>
+h2 {
+	margin-top:60px;
+	text-align:center;
+    font-size: 10mm;
+}
+
+label {
+	font-size: 8mm;
+}
+/* Add padding to containers */
+.container {
+  padding: 60px;
+}
+
+/* Full-width inputs */
+input[type=text], input[type=submit] {
+  width: 100%;
+  padding: 12px 20px;
+  margin: 8px 0;
+  display: inline-block;
+  border: 1px solid #ccc;
+  box-sizing: border-box;
+  font-size: 8mm;
+
+}
+
+::placeholder{
+	opacity:40%;
+}
+
+</style>
+</html>

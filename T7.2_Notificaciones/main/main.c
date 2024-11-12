@@ -15,8 +15,8 @@
 #include "nvs_flash.h"
 
 // Constants
-#define SSID "IoT_AP"
-#define PASS "12345678"
+#define SSID "ESP_NET"
+#define PASS "ESP_NET_IOT"
 #define LED GPIO_NUM_2
 #define ADC_SELECTED GPIO_NUM_34
 #define ADC1_CHANNEL ADC_CHANNEL_6
@@ -117,11 +117,11 @@ void adc_init() {
 
 void ledc_init() {
    ledc_timer_config_t ledc_timer = {
-       .duty_resolution = LEDC_TIMER_10_BIT,  // resolution of PWM duty
-       .freq_hz = LEDC_FREQUENCY,             // frequency of PWM signal
-       .speed_mode = LEDC_HIGH_SPEED_MODE,    // timer mode
-       .timer_num = LEDC_TIMER_0,             // timer index
-       .clk_cfg = LEDC_AUTO_CLK,              // Auto select the source clock
+       .duty_resolution = LEDC_TIMER_10_BIT,
+       .freq_hz = LEDC_FREQUENCY,
+       .speed_mode = LEDC_HIGH_SPEED_MODE,
+       .timer_num = LEDC_TIMER_0,
+       .clk_cfg = LEDC_AUTO_CLK,
    };
    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
@@ -452,5 +452,5 @@ void app_main(void) {
       vTaskDelay(1000 / portTICK_PERIOD_MS);
    }
    xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
-   xTaskCreate(send_email_task, "sendEmail", 2048, NULL, 1, NULL);
+   xTaskCreate(send_email_task, "send_email", 2048, NULL, 1, NULL);
 }

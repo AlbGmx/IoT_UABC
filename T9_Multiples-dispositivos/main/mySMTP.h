@@ -1,5 +1,5 @@
-#ifndef myMail_h
-#define myMail_h
+#ifndef mySMTP_h
+#define mySMTP_h
 #include <mbedtls/base64.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +20,6 @@
 #include "nvs_flash.h"
 #include "protocol_examples_common.h"
 
-/* Constants that are configurable in menuconfig */
 #define MAIL_SERVER CONFIG_SMTP_SERVER
 #define MAIL_PORT CONFIG_SMTP_PORT_NUMBER
 #define SENDER_MAIL CONFIG_SMTP_SENDER_MAIL
@@ -39,6 +38,6 @@
       }                                                                        \
    } while (0)
 
-void smtp_client_task(void *);
+void smtp_client_task();
 
 #endif

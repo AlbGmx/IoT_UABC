@@ -1,5 +1,6 @@
 #include <esp_http_server.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -7,6 +8,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_eth.h"
 #include "esp_event.h"
+#include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -21,7 +23,8 @@
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
-#include "myMail.h"
+#include "myMQTT.h"
+#include "mySMTP.h"
 #include "nvs_flash.h"
 
 // Constants
@@ -81,7 +84,15 @@
 #define WIFI_STA_STARTED_BIT BIT1
 #define WIFI_CONNECTED_TO_AP_BIT BIT2
 
-// static char *prefix = NULL;
+enum {
+   SMS_SEND = 0,
+   MQTT_PUBLISH,
+   MQTT_SUBSCRIBE,
+   MQTT_UNSUBSCRIBE,
+   SMTP_SEND,
+};
+
+static char prefix[64] = {0};
 static const char *TAG = "Prototipo en Red Local";
 static const char *TAG_WIFI_AP = "WiFi AP";
 static const char *TAG_WIFI_STA = "WiFi STA";
@@ -97,15 +108,17 @@ TaskHandle_t keep_alive_task_handle = NULL;
 // Global variables
 bool wifi_connected = false;
 bool logged_in = false;
+bool is_mqtt_connected = false;
 int retry_num = 0;
 int sock = 0;
-bool messageSent = 0;
 adc_oneshot_unit_handle_t adc1_handle;
 EventGroupHandle_t wifi_event_group = NULL;
+EventGroupHandle_t mqtt_event_group = NULL;
 char deviceNumber[MAX_CHAR] = {0};
 char ssid[MAX_CHAR] = {0};
 char pass[MAX_CHAR] = {0};
 httpd_handle_t server = NULL;
+esp_mqtt_client_handle_t client = NULL;
 
 void gpio_init() {
    gpio_config_t io_conf;
@@ -239,6 +252,30 @@ esp_err_t set_nvs_creds_and_name(const char *ssid, const char *pass, char *devic
    return ESP_OK;
 }
 
+// Function to decode URL-encoded strings
+void url_decode(char *str) {
+   char *source = str;
+   char *destination = str;
+   while (*source) {
+      if (*source == '%') {
+         if (isxdigit((unsigned char)source[1]) && isxdigit((unsigned char)source[2])) {
+            char hex[3] = {source[1], source[2], '\0'};
+            *destination = (char)strtol(hex, NULL, 16);
+            source += 3;
+         } else {
+            *destination = *source++;
+         }
+      } else if (*source == '+') {
+         *destination = ' ';
+         source++;
+      } else {
+         *destination = *source++;
+      }
+      destination++;
+   }
+   *destination = '\0';
+}
+
 esp_err_t config_get_handler(httpd_req_t *req) {
    char *buf;
    size_t buf_len;
@@ -246,41 +283,38 @@ esp_err_t config_get_handler(httpd_req_t *req) {
    extern unsigned char config_end[] asm("_binary_config_html_end");
    size_t config_len = config_end - config_start;
    char configHtml[config_len];
-   memcpy(configHtml, config_start, config_len);
-   ESP_LOGI(TAG_SERVER, "URI: %s\n", req->uri);
 
-   buf_len = httpd_req_get_hdr_value_len(req, "Host") + 1;
-   if (buf_len > 1) {
-      buf = malloc(buf_len);
-      if (httpd_req_get_hdr_value_str(req, "Host", buf, buf_len) == ESP_OK) {
-         ESP_LOGI(TAG_SERVER, "Found header => Host: %s\n", buf);
-      }
-      free(buf);
-   }
+   // Copy the HTML template into the buffer
+   memcpy(configHtml, config_start, config_len);
 
    buf_len = httpd_req_get_url_query_len(req) + 1;
    if (buf_len > 1) {
       buf = malloc(buf_len);
+
       if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
-         ESP_LOGI(TAG_SERVER, "Found URL query => %s", buf);
-
-         if (httpd_query_key_value(buf, "query_name", deviceNumber, sizeof(deviceNumber)) == ESP_OK)
-            ESP_LOGI(TAG_SERVER, "Found URL query parameter => query_name=%s", deviceNumber);
-
-         if (httpd_query_key_value(buf, "query_ssid", ssid, sizeof(ssid)) == ESP_OK)
-            ESP_LOGI(TAG_SERVER, "Found URL query parameter => query_ssid=%s", ssid);
-
-         if (httpd_query_key_value(buf, "query_pass", pass, sizeof(pass)) == ESP_OK)
-            ESP_LOGI(TAG_SERVER, "Found URL query parameter => query_pass=%s", pass);
-
+         if (httpd_query_key_value(buf, "query_name", deviceNumber, sizeof(deviceNumber)) == ESP_FAIL ||
+             httpd_query_key_value(buf, "query_ssid", ssid, sizeof(ssid)) == ESP_FAIL ||
+             httpd_query_key_value(buf, "query_pass", pass, sizeof(pass)) == ESP_FAIL) {
+            ESP_LOGW(TAG_SERVER, "query_name not found in the query string.");
+         }
+         url_decode(ssid);
+         url_decode(pass);
          if (strlen(ssid) > 0 && strlen(pass) > 0 && strlen(deviceNumber) > 0) {
+            ESP_LOGI(TAG_SERVER, "All parameters found, setting credentials...");
             set_nvs_creds_and_name(ssid, pass, deviceNumber);
-            ESP_LOGI(TAG_SERVER, "Credentials set, restarting...");
+            ESP_LOGW(TAG_SERVER, "Credentials set, restarting...");
+            delaySeconds(2);
             free(buf);
             esp_restart();
+         } else {
+            ESP_LOGW(TAG_SERVER, "Missing required query parameters. No changes made.");
          }
+      } else {
+         ESP_LOGE(TAG_SERVER, "Failed to retrieve URL query string.");
       }
       free(buf);
+   } else {
+      ESP_LOGW(TAG_SERVER, "No query string found.");
    }
 
    httpd_resp_set_type(req, "text/html");
@@ -289,6 +323,7 @@ esp_err_t config_get_handler(httpd_req_t *req) {
    if (httpd_req_get_hdr_value_len(req, "Host") == 0) {
       ESP_LOGI(TAG_SERVER, "Request headers lost");
    }
+
    return ESP_OK;
 }
 
@@ -309,7 +344,7 @@ httpd_handle_t start_webserver(void) {
       return server;
    }
 
-   ESP_LOGI(TAG_SERVER, "Error starting server!");
+   ESP_LOGE(TAG_SERVER, "Error starting server!");
    return NULL;
 }
 
@@ -382,7 +417,7 @@ esp_err_t getWifiCredentials() {
    size_t ssid_size = sizeof(ssid);
    size_t pass_size = sizeof(pass);
    if (nvs_get_str(nvs_handle, "deviceNumber", deviceNumber, &device_size) != ESP_OK) {
-      ESP_LOGE(TAG_NVS, "Error getting device number");
+      ESP_LOGW(TAG_NVS, "Error getting device number");
       return ESP_ERR_NVS_NOT_FOUND;
    }
    if (nvs_get_str(nvs_handle, "ssid", ssid, &ssid_size) != ESP_OK) {
@@ -442,61 +477,63 @@ int read_element(int element) {
    }
 }
 
-// void process_command(const char *command, char *response) {
-//    if (strncmp(command, prefix, strlen(prefix)) != 0) {
-//       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
-//       return;
-//    }
-//
-//    const char *cmd = command + strlen(prefix);
-//    char operation;
-//    char element;
-//    char value[3] = {0};
-//    char comment[BUFFER_SIZE] = {0};
-//
-//    int parsed = sscanf(cmd, "%c:%c:%3[^:]s:%127[^:]s", &operation, &element, value, comment);
-//    if (parsed <= 2 || parsed > 4) {
-//       ESP_LOGE(TAG, "Parsed: %d", parsed);
-//       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
-//       return;
-//    }
-//    if (operation == READ_INSTRUCTION) {
-//       if (parsed == 3) {
-//          sscanf(cmd, "%c:%c:%127[^:]s", &operation, &element, comment);
-//       } else {
-//          char temp[BUFFER_SIZE - sizeof(value)] = {0};
-//          strcpy(temp, comment);
-//          snprintf(comment, BUFFER_SIZE, "%s%s", value, temp);
-//       }
-//       value[0] = 0;
-//    }
-//
-//    switch (operation) {
-//       case WRITE_INSTRUCTION:
-//          if (element == LED_ELEMENT && (value[0] == '0' || value[0] == '1')) {
-//             set_led(value[0] - '0');
-//             snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_led());
-//          } else if (element == PWM_ELEMENT) {
-//             set_pwm(atoi(value));
-//             snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_pwm());
-//          } else {
-//             if (element == ADC_ELEMENT) ESP_LOGI(TAG, "ADC value is readonly");
-//             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
-//          }
-//          break;
-//       case READ_INSTRUCTION:
-//          int readed_value = read_element(element);
-//          if (readed_value != ESP_FAIL) {
-//             snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", readed_value);
-//          } else {
-//             snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
-//          }
-//          break;
-//
-//       default:
-//          snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
-//    }
-// }
+void process_command(const char *command, char *response) {
+   snprintf(prefix, sizeof(prefix), "%s:%s:%c", IDENTIFIER, USER_KEY, deviceNumber[0]);
+   ESP_LOGI(TAG, "%s", prefix);
+   if (strncmp(command, prefix, strlen(prefix)) != 0) {
+      snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
+      return;
+   }
+
+   const char *cmd = command + strlen(prefix);
+   char operation;
+   char element;
+   char value[3] = {0};
+   char comment[BUFFER_SIZE] = {0};
+
+   int parsed = sscanf(cmd, "%c:%c:%3[^:]s:%127[^:]s", &operation, &element, value, comment);
+   if (parsed <= 2 || parsed > 4) {
+      ESP_LOGE(TAG, "Parsed: %d", parsed);
+      snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
+      return;
+   }
+   if (operation == READ_INSTRUCTION) {
+      if (parsed == 3) {
+         sscanf(cmd, "%c:%c:%127[^:]s", &operation, &element, comment);
+      } else {
+         char temp[BUFFER_SIZE - sizeof(value)] = {0};
+         strcpy(temp, comment);
+         snprintf(comment, BUFFER_SIZE, "%s%s", value, temp);
+      }
+      value[0] = 0;
+   }
+
+   switch (operation) {
+      case WRITE_INSTRUCTION:
+         if (element == LED_ELEMENT && (value[0] == '0' || value[0] == '1')) {
+            set_led(value[0] - '0');
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_led());
+         } else if (element == PWM_ELEMENT) {
+            set_pwm(atoi(value));
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", read_pwm());
+         } else {
+            if (element == ADC_ELEMENT) ESP_LOGI(TAG, "ADC value is readonly");
+            snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
+         }
+         break;
+      case READ_INSTRUCTION:
+         int readed_value = read_element(element);
+         if (readed_value != ESP_FAIL) {
+            snprintf(response, BUFFER_SIZE, ACK_RESPONSE ":%d", readed_value);
+         } else {
+            snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
+         }
+         break;
+
+      default:
+         snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
+   }
+}
 
 void keep_alive_task() {
    while (true) {
@@ -584,8 +621,17 @@ void tcp_client_task() {
       }
    }
 }
+void constructStrings() {
+   if (deviceNumber[0] == 0) {
+      ESP_LOGE(TAG, "Device number error %s", deviceNumber);
+   }
+   snprintf(prefix, sizeof(prefix), "%s:%s:%c", IDENTIFIER, USER_KEY, deviceNumber[0]);
 
-void send_phone_message_task() {
+   ESP_LOGI(TAG, "'%s'", prefix);
+}
+
+void button_task(void *pvParameters) {
+   int action = (int)pvParameters;
    bool buttonState = 0;
    lastStateChange = -SEND_MESSAGE_DELAY_TIME;
 
@@ -601,8 +647,28 @@ void send_phone_message_task() {
             vTaskDelay(10 / portTICK_PERIOD_MS);
          }
          if (now - lastStateChange > SEND_MESSAGE_DELAY_TIME) {
-            ESP_LOGI(TAG, "Boton presionado, enviando mensaje\n");
-            send(sock, message, strlen(message), 0);
+            ESP_LOGI(TAG, "Boton presionado\n");
+            switch (action) {
+               case SMS_SEND:
+                  send(sock, message, strlen(message), 0);
+                  break;
+               case MQTT_PUBLISH:
+                  char aux[32] = {0};
+                  snprintf(aux, sizeof(aux), "%s:%d", USER_KEY, read_led());
+                  my_mqtt_publish("device/led", aux);
+                  break;
+               case MQTT_SUBSCRIBE:
+                  my_mqtt_subscribe("device/led");
+                  break;
+               case MQTT_UNSUBSCRIBE:
+                  my_mqtt_unsubscribe("device/led");
+                  break;
+               case SMTP_SEND:
+                  smtp_client_task();
+                  break;
+               default:
+                  break;
+            }
             lastStateChange = xTaskGetTickCount() * portTICK_PERIOD_MS;
          }
          while (gpio_get_level(BUTTON_SEND_MESSAGE) == PUSHED) {
@@ -619,7 +685,8 @@ void app_main(void) {
    esp_err_t ret = nvs_flash_init();
    gpio_init();
    if (gpio_get_level(RESTART_PIN) == PUSHED) {
-      ESP_LOGE(TAG_NVS, "Manual NVS erase requested");
+      ESP_LOGW(TAG_NVS, "Manual NVS erase requested");
+      delaySeconds(2);
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
    }
@@ -629,16 +696,27 @@ void app_main(void) {
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
    }
-
    ESP_ERROR_CHECK(ret);
+
+   constructStrings();
    wifi_init();
    adc_init();
    ledc_init();
-   xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_TO_AP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+   constructStrings();
+   // xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_TO_AP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+   // mqtt5_app_start();
+   // // testing
+   // xEventGroupWaitBits(mqtt_event_group, MQTT_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+   // char aux[MAX_CHAR] = {0};
+   // snprintf(aux, sizeof(aux), "%d:%s%s", read_led(), USER_KEY, "Prueba myMQTT");
+   // my_mqtt_publish("device/led", aux);
 
    // xTaskCreate(smtp_client_task, "smtp_client_task", TASK_STACK_SIZE, NULL, 5, NULL);
-   // xTaskCreate(send_phone_message_task, "send_phone_message_task", 2048, NULL, 1, NULL);
-   xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
+   // xTaskCreate(button_task, "button_task", 2048, (void *)SMTP_SEND, 1, NULL);
+   // xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_subscriber_task, "mqtt_subscriber_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_publisher_task, "mqtt_publisher_task", 4096, NULL, 5, NULL);
+   // xTaskCreate(mqtt5_app_start, "mqtt5_app_start", 4096, NULL, 5, NULL);
 }

@@ -10,19 +10,12 @@
  * SPDX-FileContributor: 2015-2021 Espressif Systems (Shanghai) CO LTD
  */
 
-#include "myMail.h"
+#include "mySMTP.h"
 
-const char *TAG_Mail = "myMail";
+const char *TAG_Mail = "mySMTP";
 
 extern const uint8_t server_root_cert_pem_start[] asm("_binary_server_root_cert_pem_start");
 extern const uint8_t server_root_cert_pem_end[] asm("_binary_server_root_cert_pem_end");
-
-#define VALIDATE_MBEDTLS_RETURN(ret, min_valid_ret, max_valid_ret, goto_label) \
-   do {                                                                        \
-      if (ret < min_valid_ret || ret > max_valid_ret) {                        \
-         goto goto_label;                                                      \
-      }                                                                        \
-   } while (0)
 
 static int write_and_get_response(mbedtls_net_context *sock_fd, unsigned char *buf, size_t len) {
    int ret;
@@ -190,7 +183,7 @@ exit:
    return ret;
 }
 
-void smtp_client_task(void *pvParameters) {
+void smtp_client_task() {
    char *buf = NULL;
    unsigned char base64_buffer[128];
    int ret, len;

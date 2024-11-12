@@ -1,33 +1,43 @@
-menu "Example Configuration"
-
+menu "My SMTP Configuration"
     config SMTP_SERVER
         string "Mail Server"
         default "smtp.googlemail.com"
-        help
+        help 
             Target domain for the example to connect to.
 
     config SMTP_PORT_NUMBER
         string "Mail port number"
         default "587"
-        help
+        help 
             Mail port number for the example to connect to.
 
     config SMTP_SENDER_MAIL
         string "Sender email"
         default "sender.email@gmail.com"
-        help
+        help 
             Sender's Email address
 
     config SMTP_SENDER_PASSWORD
         string "Sender password"
         default "password@123"
-        help
+        help 
             Sender's email password
 
     config SMTP_RECIPIENT_MAIL
         string "Recipient email"
         default "recipient.email@gmail.com"
-        help
+        help 
             Recipient's email
+endmenu
 
+menu "My MQTT Configuration"
+    config BROKER_URL
+        string "Broker URL"
+        default "mqtt://mqtt.eclipseprojects.io"
+        help 
+            URL of the broker to connect to
+
+    config BROKER_URL_FROM_STDIN
+        bool
+        default y if BROKER_URL = "FROM_STDIN"
 endmenu

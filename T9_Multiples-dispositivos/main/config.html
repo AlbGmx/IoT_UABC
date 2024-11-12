@@ -1,52 +1,41 @@
 <!DOCTYPE html>
 <html>
+
 <body>
+    <meta charset="UTF-8">
+    <h2 align="center" style="color: #4CAF50;">Configurar Dispositivo</h2>
 
-<h2>Configure the wifi</h2>
-<div id="container" class="container">
-<form action="/config">
-  <label for="query_name">Nombre del ESP32</label><br>
-  <input type="text" id="query_name" name="query_name" placeholder="0 or 1"><br><br>
-  <label for="query_ssid">Nombre del WiFi</label><br>
-  <input type="text" id="query_ssid" name="query_ssid" placeholder="SSID"><br><br>
-  <label for="query_pass">Contraseña</label><br>
-  <input type="password" id="query_pass" name="query_pass" placeholder="Password"><br><br><br>
-  <input type="submit" value="Enviar">
-</form> 
+    <table align="center" cellpadding="10" cellspacing="0" border="1" bgcolor="#f0f4f8"
+        style="border-collapse: collapse;">
+        <form action="/config">
+            <tr bgcolor="#4CAF50">
+                <td colspan="2" align="center" style="color: white; font-weight: bold;">Configuración WiFi</td>
+            </tr>
+            <tr>
+                <td><label for="query_name" style="color: #333;">Número del Dispositivo (0 ó 1):</label></td>
+                <td><input type="text" id="query_name" name="query_name" placeholder="0 ó 1" required pattern="[0-1]">
+                </td>
+            </tr>
+            <tr>
+                <td><label for="query_ssid" style="color: #333;">Nombre del WiFi:</label></td>
+                <td><input type="text" id="query_ssid" name="query_ssid" maxlength="32" placeholder="WiFi SSID"
+                        required>
+                </td>
+            </tr>
+            <tr>
+                <td><label for="query_pass" style="color: #333;">Password del WiFi:</label></td>
+                <td><input type="password" id="query_pass" name="query_pass" maxlength="32"
+                        placeholder="WIFI PASS" required></td>
+            </tr>
+            <tr bgcolor="#e7f3e7">
+                <td colspan="2" align="center">
+                    <input type="submit" value="Enviar"
+                        style="background-color: #4CAF50; color: white; padding: 8px 16px; border: none; cursor: pointer;">
+                </td>
+            </tr>
+        </form>
+    </table>
 
-<p></p>
-</div>
 </body>
-<style>
-h2 {
-	margin-top:60px;
-	text-align:center;
-    font-size: 10mm;
-}
 
-label {
-	font-size: 8mm;
-}
-/* Add padding to containers */
-.container {
-  padding: 60px;
-}
-
-/* Full-width inputs */
-input[type=text], input[type=submit] {
-  width: 100%;
-  padding: 12px 20px;
-  margin: 8px 0;
-  display: inline-block;
-  border: 1px solid #ccc;
-  box-sizing: border-box;
-  font-size: 8mm;
-
-}
-
-::placeholder{
-	opacity:40%;
-}
-
-</style>
 </html>

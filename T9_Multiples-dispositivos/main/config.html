@@ -1,40 +1,85 @@
 <!DOCTYPE html>
 <html>
 
-<body>
-    <meta charset="UTF-8">
-    <h2 align="center" style="color: #4CAF50;">Configurar Dispositivo</h2>
+<head>
+	<title>WiFi Configuration</title>
+	<style>
+		body {
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			height: 100vh;
+			margin: 0;
+			font-family: Arial, sans-serif;
+			background-color: #f0f4f8;
+		}
 
-    <table align="center" cellpadding="10" cellspacing="0" border="1" bgcolor="#f0f4f8"
-        style="border-collapse: collapse;">
-        <form action="/config">
-            <tr bgcolor="#4CAF50">
-                <td colspan="2" align="center" style="color: white; font-weight: bold;">Configuración WiFi</td>
-            </tr>
-            <tr>
-                <td><label for="query_name" style="color: #333;">Número del Dispositivo (0 ó 1):</label></td>
-                <td><input type="text" id="query_name" name="query_name" placeholder="0 ó 1" required pattern="[0-1]">
-                </td>
-            </tr>
-            <tr>
-                <td><label for="query_ssid" style="color: #333;">Nombre del WiFi:</label></td>
-                <td><input type="text" id="query_ssid" name="query_ssid" maxlength="32" placeholder="WiFi SSID"
-                        required>
-                </td>
-            </tr>
-            <tr>
-                <td><label for="query_pass" style="color: #333;">Password del WiFi:</label></td>
-                <td><input type="password" id="query_pass" name="query_pass" maxlength="32"
-                        placeholder="WIFI PASS" required></td>
-            </tr>
-            <tr bgcolor="#e7f3e7">
-                <td colspan="2" align="center">
-                    <input type="submit" value="Enviar"
-                        style="background-color: #4CAF50; color: white; padding: 8px 16px; border: none; cursor: pointer;">
-                </td>
-            </tr>
-        </form>
-    </table>
+		.config-form {
+			background-color: #ffffff;
+			padding: 30px;
+			border-radius: 10px;
+			box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+			width: 320px;
+			text-align: center;
+		}
+
+		.config-form h2 {
+			margin-bottom: 20px;
+			color: #333;
+			font-size: 24px;
+		}
+
+		.config-form label {
+			display: block;
+			margin-bottom: 8px;
+			font-weight: bold;
+			color: #666;
+		}
+
+		.config-form input[type="text"],
+		.config-form input[type="password"] {
+			width: 100%;
+			padding: 10px;
+			margin-bottom: 15px;
+			border: 1px solid #ccc;
+			border-radius: 5px;
+			font-size: 16px;
+		}
+
+		.config-form input[type="submit"] {
+			width: 100%;
+			padding: 12px;
+			font-size: 16px;
+			background-color: #4CAF50;
+			color: white;
+			border: none;
+			border-radius: 5px;
+			cursor: pointer;
+		}
+
+		.config-form input[type="submit"]:hover {
+			background-color: #45a049;
+		}
+	</style>
+</head>
+
+<body>
+
+	<div class="config-form">
+		<h2>Configurar WiFi</h2>
+		<form action="/config">
+			<label for="query_ssid">WiFi Name</label>
+			<input type="text" id="query_ssid" name="query_ssid" maxlength="32" placeholder="SSID" required>
+
+			<label for="query_pass">WiFi Password</label>
+			<input type="password" id="query_pass" name="query_pass" maxlength="32" placeholder="Password" required>
+
+			<label for="query_name">Device Name (0 or 1)</label>
+			<input type="text" id="query_name" name="query_name" placeholder="0 or 1" required pattern="[0-1]">
+
+			<input type="submit" value="Finish">
+		</form>
+	</div>
 
 </body>
 

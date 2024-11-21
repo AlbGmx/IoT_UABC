@@ -669,6 +669,28 @@ void button_task(void *pvParameters) {
                default:
                   break;
             }
+            ESP_LOGI(TAG, "Boton presionado\n");
+            switch (action) {
+               case SMS_SEND:
+                  send(sock, message, strlen(message), 0);
+                  break;
+               case MQTT_PUBLISH:
+                  char aux[32] = {0};
+                  snprintf(aux, sizeof(aux), "%s:%d", USER_KEY, read_led());
+                  my_mqtt_publish("device/led", aux);
+                  break;
+               case MQTT_SUBSCRIBE:
+                  my_mqtt_subscribe("device/led");
+                  break;
+               case MQTT_UNSUBSCRIBE:
+                  my_mqtt_unsubscribe("device/led");
+                  break;
+               case SMTP_SEND:
+                  smtp_client_task();
+                  break;
+               default:
+                  break;
+            }
             lastStateChange = xTaskGetTickCount() * portTICK_PERIOD_MS;
          }
          while (gpio_get_level(BUTTON_SEND_MESSAGE) == PUSHED) {
@@ -706,7 +728,6 @@ void app_main(void) {
    constructStrings();
    // xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_TO_AP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
    // mqtt5_app_start();
-   // // testing
    // xEventGroupWaitBits(mqtt_event_group, MQTT_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
    // char aux[MAX_CHAR] = {0};
@@ -718,5 +739,4 @@ void app_main(void) {
    // xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_subscriber_task, "mqtt_subscriber_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_publisher_task, "mqtt_publisher_task", 4096, NULL, 5, NULL);
-   // xTaskCreate(mqtt5_app_start, "mqtt5_app_start", 4096, NULL, 5, NULL);
 }

@@ -1,6 +1,6 @@
-#include "myMQTT.h"
+#include "my_MQTT.h"
 
-static const char *TAG_MQTT = "myMQTT";
+static const char *TAG_MQTT = "my MQTT";
 
 static void log_error_if_nonzero(const char *message, int error_code) {
    if (error_code != 0) {

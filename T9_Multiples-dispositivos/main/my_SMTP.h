@@ -1,5 +1,5 @@
-#ifndef mySMTP_h
-#define mySMTP_h
+#ifndef __MY_SMTP_H
+#define __MY_SMTP_H
 #include <mbedtls/base64.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,8 +17,6 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/platform.h"
 #include "mbedtls/ssl.h"
-#include "nvs_flash.h"
-#include "protocol_examples_common.h"
 
 #define MAIL_SERVER CONFIG_SMTP_SERVER
 #define MAIL_PORT CONFIG_SMTP_PORT_NUMBER
@@ -29,7 +27,7 @@
 #define SERVER_USES_STARTSSL 1
 
 #define TASK_STACK_SIZE (8 * 1024)
-#define BUF_SIZE 512
+#define SMTP_BUFFER_SIZE 512
 
 #define VALIDATE_MBEDTLS_RETURN(ret, min_valid_ret, max_valid_ret, goto_label) \
    do {                                                                        \
@@ -40,4 +38,4 @@
 
 void smtp_client_task();
 
-#endif
+#endif // __MY_SMTP_H

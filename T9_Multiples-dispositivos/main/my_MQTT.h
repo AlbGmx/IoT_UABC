@@ -1,5 +1,5 @@
-#ifndef myMQTT_h
-#define myMQTT_h
+#ifndef __MY_MQTT_H
+#define __MY_MQTT_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -13,7 +13,8 @@
 #include "freertos/event_groups.h"
 #include "mqtt_client.h"
 #include "nvs_flash.h"
-#include "protocol_examples_common.h"
+
+// #include "protocol_examples_common.h"
 
 #define BROKER_URL CONFIG_BROKER_URL
 #define MQTT_CONNECTED_BIT BIT0

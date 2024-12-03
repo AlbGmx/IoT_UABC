@@ -50,9 +50,10 @@
 #define ADC_ELEMENT 'A'
 #define PWM_ELEMENT 'P'
 #define BUFFER_SIZE 128
-#define PORT 8266
+#define PORT 8276
 // #define HOST_IP_ADDR "192.168.1.69"  // Local IP
 #define HOST_IP_ADDR "82.180.173.228"  // IoT Server
+// #define HOST_IP_ADDR "213.188.196.24"  // World Time API
 #define LED_PWM GPIO_NUM_21
 #define LEDC_TIMER LEDC_TIMER_0
 #define LEDC_CHANNEL 0
@@ -98,9 +99,10 @@ static const char *TAG_WIFI_AP = "WiFi AP";
 static const char *TAG_WIFI_STA = "WiFi STA";
 static const char *TAG_NVS = "NVS";
 static const char *TAG_SERVER = "WEB SERVER";
-static const char *log_in = "UABC:EGC:0:L:S:Log in";
-static const char *keep_alive = "UABC:EGC:0:K:S:Keep alive";
-static const char *message = "UABC:EGC:M:S:6656560351:Mensaje enviado desde ESP32";
+static const char *log_in = "UABC:EGC:1:L:S:Log in";
+static const char *keep_alive = "UABC:EGC:1:K:S:Keep alive";
+static const char *message = "UABC:EGC::1:M:S:6656560351:Mensaje enviado desde ESP32";
+static const char *get = "GET /api/timezone/America/Tijuana.txt HTTP/1.1\nHost: worldtimeapi.org\r\n\r\n ";
 
 int32_t lastStateChange = 0;
 TaskHandle_t keep_alive_task_handle = NULL;
@@ -225,8 +227,8 @@ int read_adc_value() {
    return ESP_FAIL;
 }
 
-void delaySeconds(uint8_t seconds) { vTaskDelay(seconds * SECOND_IN_MILLIS / portTICK_PERIOD_MS); }
-void delayMillis(uint8_t seconds) { vTaskDelay(seconds / portTICK_PERIOD_MS); }
+void delaySeconds(uint16_t seconds) { vTaskDelay(seconds * SECOND_IN_MILLIS / portTICK_PERIOD_MS); }
+void delayMillis(uint16_t seconds) { vTaskDelay(seconds / portTICK_PERIOD_MS); }
 
 esp_err_t set_nvs_creds_and_name(const char *ssid, const char *pass, char *deviceNumber) {
    nvs_handle_t nvs_handle;
@@ -478,8 +480,8 @@ int read_element(int element) {
 }
 
 void process_command(const char *command, char *response) {
-   snprintf(prefix, sizeof(prefix), "%s:%s:%c", IDENTIFIER, USER_KEY, deviceNumber[0]);
-   ESP_LOGI(TAG, "%s", prefix);
+   snprintf(prefix, sizeof(prefix), "%s:%s:%c:", IDENTIFIER, USER_KEY, deviceNumber[0]);
+   // ESP_LOGI(TAG, "%s\n", prefix);
    if (strncmp(command, prefix, strlen(prefix)) != 0) {
       snprintf(response, BUFFER_SIZE, NACK_RESPONSE);
       return;
@@ -543,6 +545,8 @@ void keep_alive_task() {
    }
 }
 
+void getCurrentTime(char *response) { ESP_LOGI(TAG, "%s", response); }
+
 void tcp_client_task() {
    char rx_buffer[128];
    char host_ip[] = HOST_IP_ADDR;
@@ -595,8 +599,9 @@ void tcp_client_task() {
          }
 
          else {
-            rx_buffer[len] = 0;
-            if (strstr(rx_buffer, NACK_RESPONSE) == rx_buffer || strstr(rx_buffer, ACK_RESPONSE) == rx_buffer) {
+            rx_buffer[len + 1] = 0;
+            if (strstr(rx_buffer, NACK_RESPONSE) == rx_buffer || strstr(rx_buffer, ACK_RESPONSE) == rx_buffer ||
+                rx_buffer[0] == '\0') {
                // TODO: Add logic for nack
                ESP_LOGI(TAG, "RECEIVED FROM %s: \'%s\'\n", host_ip, rx_buffer);
             } else {
@@ -604,7 +609,7 @@ void tcp_client_task() {
                ESP_LOGI(TAG, "\'%s\'\n", rx_buffer);
 
                char answer[BUFFER_SIZE] = NACK_RESPONSE;  // Default response
-               // process_command(rx_buffer, answer);
+               process_command(rx_buffer, answer);
                send(sock, answer, strlen(answer), 0);
                ESP_LOGI(TAG, "SENT %s TO %s\n", answer, host_ip);
             }
@@ -621,6 +626,73 @@ void tcp_client_task() {
       }
    }
 }
+
+void tcp_client_task2() {
+   char rx_buffer[4096];
+   char host_ip[] = HOST_IP_ADDR;
+   int addr_family = 0;
+   int ip_protocol = 0;
+
+   while (true) {
+      struct sockaddr_in dest_addr;
+      inet_pton(AF_INET, host_ip, &dest_addr.sin_addr);
+      dest_addr.sin_family = AF_INET;
+      dest_addr.sin_port = htons(PORT);
+      addr_family = AF_INET;
+      ip_protocol = IPPROTO_IP;
+
+      sock = socket(addr_family, SOCK_STREAM, ip_protocol);
+      if (sock < 0) {
+         ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+         break;
+      }
+      ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
+
+      int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+      if (err != 0) {
+         ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
+         break;
+      }
+      ESP_LOGI(TAG, "Successfully connected");
+
+      while (true) {
+         err = 0;
+         ESP_LOGI(TAG, "Sending get message...");
+         err = send(sock, get, strlen(get), 0);
+
+         if (err < 0) {
+            ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+            break;
+         }
+
+         int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+         if (len < 0) {
+            ESP_LOGE(TAG, "recv failed: errno %d", errno);
+            break;
+         }
+
+         else {
+            rx_buffer[len] = 0;
+            ESP_LOGI(TAG, "RECEIVED FROM %s:", host_ip);
+            ESP_LOGI(TAG, "\'%s\'\n", rx_buffer);
+            getCurrentTime(rx_buffer);
+            while (true) {
+               delaySeconds(1);
+            }
+         }
+      }
+
+      if (sock != -1) {
+         ESP_LOGE(TAG, "Shutting down socket and restarting...");
+         shutdown(sock, 0);
+         close(sock);
+      } else if (sock == 0) {
+         ESP_LOGE(TAG, "Connection closed by server");
+         vTaskSuspend(keep_alive_task_handle);
+      }
+   }
+}
+
 void constructStrings() {
    if (deviceNumber[0] == 0) {
       ESP_LOGE(TAG, "Device number error %s", deviceNumber);
@@ -638,9 +710,6 @@ void button_task(void *pvParameters) {
    while (true) {
       buttonState = gpio_get_level(BUTTON_SEND_MESSAGE);
       int64_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-      // ESP_LOGI(TAG, "buttonState %s, now %lld", buttonState == FREED ? "Liberado" : "P", now);
-
-      // ESP_LOGI(TAG, "buttonState %d, now %lld", buttonState, now);
       if (buttonState == FREED) {
          while (gpio_get_level(BUTTON_SEND_MESSAGE) == FREED) {
             // ESP_LOGI(TAG, "Esperando a que el boton sea presionado");
@@ -726,7 +795,7 @@ void app_main(void) {
    ledc_init();
 
    constructStrings();
-   // xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_TO_AP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+   xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_TO_AP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
    // mqtt5_app_start();
    // xEventGroupWaitBits(mqtt_event_group, MQTT_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
@@ -737,6 +806,7 @@ void app_main(void) {
    // xTaskCreate(smtp_client_task, "smtp_client_task", TASK_STACK_SIZE, NULL, 5, NULL);
    // xTaskCreate(button_task, "button_task", 2048, (void *)SMTP_SEND, 1, NULL);
    // xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
+   xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_subscriber_task, "mqtt_subscriber_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_publisher_task, "mqtt_publisher_task", 4096, NULL, 5, NULL);
 }

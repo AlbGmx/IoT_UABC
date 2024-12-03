@@ -60,8 +60,30 @@
 		.config-form input[type="submit"]:hover {
 			background-color: #45a049;
 		}
+
+		.toggle-password {
+			cursor: pointer;
+			font-size: 14px;
+			color: #007bff;
+			margin-top: -10px;
+			display: block;
+		}
 	</style>
 </head>
+<script>
+	function togglePassword() {
+		var passwordField = document.getElementById('query_pass');
+		var toggleText = document.querySelector('.toggle-password');
+
+		if (passwordField.type === "password") {
+			passwordField.type = "text";
+			toggleText.textContent = "Hide Password";
+		} else {
+			passwordField.type = "password";
+			toggleText.textContent = "Show Password";
+		}
+	}
+</script>
 
 <body>
 
@@ -73,6 +95,9 @@
 
 			<label for="query_pass">WiFi Password</label>
 			<input type="password" id="query_pass" name="query_pass" maxlength="32" placeholder="Password" required>
+
+			<!-- Password toggle link -->
+			<a href="#" class="toggle-password" onclick="togglePassword()">Show Password</a>
 
 			<label for="query_name">Device Name (0 or 1)</label>
 			<input type="text" id="query_name" name="query_name" placeholder="0 or 1" required pattern="[0-1]">

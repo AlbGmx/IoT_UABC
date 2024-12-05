@@ -68,9 +68,9 @@ void construct_strings() {
    }
 
    snprintf(prefix, sizeof(prefix), "%s:%s:%c", IDENTIFIER, USER_KEY, device_number[0]);
-   snprintf(log_in, BUFFER_SIZE, "%s:%s", prefix, MESSAGE_LOG_IN);
-   snprintf(keep_alive, BUFFER_SIZE, "%s:%s", prefix, MESSAGE_KEEP_ALIVE);
-   snprintf(message, BUFFER_SIZE, "%s:%s:%s", prefix, USER_KEY, MESSAGE_MESSAGE);
+   snprintf(log_in, BUFFER_SIZE, "%s:L:S:%s:", prefix, MESSAGE_LOG_IN);
+   snprintf(keep_alive, BUFFER_SIZE, "%s:K:S:%s:", prefix, MESSAGE_KEEP_ALIVE);
+   snprintf(message, BUFFER_SIZE, "%s:M:S:%s:", prefix, MESSAGE_MESSAGE);
 
    ESP_LOGI(TAG_FUNCTIONS, "'%s'", prefix);
 }
@@ -107,6 +107,8 @@ void process_command(const char *command, char *response) {
       }
       value[0] = 0;
    }
+
+   ESP_LOGI(TAG_FUNCTIONS, "Operation: %c, Element: %c, Value: %s, Comment: %s", operation, element, value, comment);
 
    switch (operation) {
       case WRITE_INSTRUCTION:

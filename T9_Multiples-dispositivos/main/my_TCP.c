@@ -22,7 +22,7 @@ void keep_alive_task() {
 void tcp_client_task() {
    tcp_event_group = xEventGroupCreate();
    char rx_buffer[128];
-   char host_ip[] = HOST_IP_ADDR;
+   char host_ip[] = LOCAL_IP_ADDR;
    int addr_family = 0;
    int ip_protocol = 0;
 
@@ -72,7 +72,7 @@ void tcp_client_task() {
          }
 
          else {
-            rx_buffer[len + 1] = 0;
+            rx_buffer[len] = 0;
             if (strstr(rx_buffer, RESPONSE_NACK) == rx_buffer || strstr(rx_buffer, RESPONSE_ACK) == rx_buffer ||
                 rx_buffer[0] == '\0') {
                // TODO: Add logic for nack
@@ -123,7 +123,8 @@ void tcp_get_time() {
 
       int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
       if (err != 0) {
-         ESP_LOGE(TAG_TCP, "Socket unable to connect: errno %d", errno);
+         ESP_LOGE(TAG_TCP, "Error: %s", strerror(errno));
+
          break;
       }
       ESP_LOGI(TAG_TCP, "Successfully connected");
@@ -145,7 +146,7 @@ void tcp_get_time() {
          }
 
          else {
-            rx_buffer[len] = 0;
+            rx_buffer[strlen(rx_buffer)] = 0;
             ESP_LOGI(TAG_TCP, "RECEIVED FROM %s:", host_ip);
             ESP_LOGI(TAG_TCP, "\'%s\'\n", rx_buffer);
             get_current_time(rx_buffer);

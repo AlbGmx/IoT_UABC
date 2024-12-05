@@ -8,3 +8,4 @@ dependencies
 dependencies.lock
 sdkconfig.defaults
 sdkconfig.ci
+*.cache/

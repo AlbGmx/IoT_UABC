@@ -245,19 +245,21 @@ void udp_to_tcp_task(void *pvParameters) {
 
 void process_command_from_device_task(void *pvParameters) {
    char command[BUFFER_SIZE] = {0};
-   const char *prefix = "UABC:EGC:";
+   const char *pre_fix = "UABC:EGC:0:";
    while (true) {
       ESP_LOGI(TAG_TCP_TASK, "Waiting for command to process from device...\n");
       xEventGroupWaitBits(connection_event_group, TCP_RECEIVED_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-      ESP_LOGI(TAG_TCP_TASK, "Processing command '%s' from device", tcp_aux);
       snprintf(command, strlen(tcp_aux) + 1, tcp_aux);
-      if (strncmp(command, prefix, strlen(prefix)) == 0) {
-         const char *cmd = command + strlen(prefix);
+      // ESP_LOGI(TAG_TCP_TASK, "Processing command '%s' from device", command);
+      if (strncmp(command, pre_fix, strlen(pre_fix)) == 0) {
+         const char *cmd = command + strlen(pre_fix);
          char operation;
          char element;
          char comment[BUFFER_SIZE] = {0};
 
+         // ESP_LOGI(TAG_TCP_TASK, "Processing command '%s' from cmd, %d", cmd, strlen(pre_fix));
          int parsed = sscanf(cmd, "%c:%c:%127[^:]s", &operation, &element, comment);
+         ESP_LOGI(TAG_TCP_TASK, "Parsed: %d, Operation: %c, Element: %c, Comment: %s", parsed, operation, element, comment);
          if (parsed < 2 || parsed > 3) {
             ESP_LOGE(TAG_TCP_TASK, "Parsed: %d", parsed);
          } else if (element == SERVER_ELEMENT) {

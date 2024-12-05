@@ -9,10 +9,10 @@
 #include "esp_log.h"
 #include "my_functions.h"
 
-#define LOCAL_IP_ADDR "192.168.1.69"             // Local IP
+#define LOCAL_IP_ADDR "192.168.1.70"             // Local IP
 #define HOST_IP_ADDR "82.180.173.228"            // IoT Server
 #define WOLRD_TIME_API_IP_ADDR "213.188.196.24"  // World Time API
-#define PORT 8276
+#define PORT 8266
 #define TCP_BUFFER_SIZE 4096
 #define STRING_SIZE 256
 #define TCP_CONNECTED_BIT BIT0

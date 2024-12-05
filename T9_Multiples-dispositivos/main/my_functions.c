@@ -136,3 +136,8 @@ void process_command(const char *command, char *response) {
          snprintf(response, BUFFER_SIZE, RESPONSE_NACK);
    }
 }
+
+void print_date(My_time_t *current_time) {
+   ESP_LOGI(TAG_FUNCTIONS, "%02d:%02d:%02d %02d/%02d/%02d", current_time->hours, current_time->minutes, current_time->seconds,
+            current_time->day, current_time->month, current_time->year);
+}

@@ -10,6 +10,41 @@
 
 // Global variables
 extern EventGroupHandle_t wifi_event_group;
+extern EventGroupHandle_t tcp_event_group;
+
+My_time_t current_time = {0};
+
+void count_time_task() {
+   xEventGroupWaitBits(tcp_event_group, TCP_TIME_LOGGED_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
+   while (true) {
+      delay_millis(1);
+      current_time.millis++;
+      if (current_time.millis == 1000) {
+         current_time.millis = 0;
+         current_time.seconds++;
+         if (current_time.seconds == 60) {
+            current_time.seconds = 0;
+            current_time.minutes++;
+            if (current_time.minutes == 60) {
+               current_time.minutes = 0;
+               current_time.hours++;
+               if (current_time.hours == 24) {
+                  current_time.hours = 0;
+                  current_time.day++;
+                  if (current_time.day == 31) {
+                     current_time.day = 1;
+                     current_time.month++;
+                     if (current_time.month == 13) {
+                        current_time.month = 1;
+                        current_time.year++;
+                     }
+                  }
+               }
+            }
+         }
+      }
+   }
+}
 
 void app_main(void) {
    gpio_init();
@@ -29,8 +64,14 @@ void app_main(void) {
 
    // xTaskCreate(smtp_client_task, "smtp_client_task", TASK_STACK_SIZE, NULL, 5, NULL);
    // xTaskCreate(button_task, "button_task", 2048, (void *)SMTP_SEND, 1, NULL);
+   tcp_get_time(&current_time);
    // xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
-   xTaskCreate(tcp_client_task, "tcp_client_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_subscriber_task, "mqtt_subscriber_task", 4096, NULL, 5, NULL);
    // xTaskCreate(mqtt_publisher_task, "mqtt_publisher_task", 4096, NULL, 5, NULL);
+   while (true)
+   {
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      print_date(&current_time);
+   }
+
 }

@@ -5,4 +5,5 @@
 cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+include_directories(${CMAKE_SOURCE_DIR}/main/includes)
 project(T9_Multiples-dispositivos)

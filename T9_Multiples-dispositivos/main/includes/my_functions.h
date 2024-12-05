@@ -16,7 +16,6 @@
 #include "my_SMTP.h"
 #include "my_TCP.h"
 #include "my_elements.h"
-
 // Constants
 // #define SSID "ESP_NET"
 // #define PASS "ESP_NET_IOT"
@@ -35,7 +34,6 @@
 #define PWM_ELEMENT 'P'
 #define BUFFER_SIZE 128
 #define WIFI_RETRY_MAX 20
-#define PORT 8276
 #define USE_LOCAL_IP true
 #define IDENTIFIER "UABC"
 #define USER_KEY "EGC"
@@ -56,11 +54,15 @@ enum {
    SMTP_SEND,
 };
 
+typedef struct {
+   uint16_t millis, seconds, minutes, hours, day, month, year;
+} My_time_t;
+
 void button_task(void *pvParameter);
 void construct_strings();
 void get_current_time(char *);
 void process_command(const char *, char *);
 void delay_seconds(uint8_t);
 void delay_millis(uint16_t);
-
+void print_date(My_time_t *);
 #endif  // __MY_FUNCTIONS_H
